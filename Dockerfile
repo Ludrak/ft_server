@@ -5,10 +5,22 @@ LABEL maintainer="Luca Robino <lrobino@student.42.fr>"
 ARG WEB_ROOT="/var/www/html"
 ARG AUTO_INDEX="on"
 
+ARG MYSQL_USR="mysql"
+ARG MYSQL_BASEDIR="/opt/mysql/mysql"
+ARG MYSQL_DATADIR="/opt/mysql/mysql/data"
+
+ARG WP_DB="wordpress"
+ARG WP_USER="wordpress"
+ARG WP_PASS="23hjDF67dsSQ86e2"
+
 ARG PHP_VERSION="7.3"
 ENV PHP_VERSION=${PHP_VERSION}
 ARG PHPMYADMIN_VERSION="4.9.4"
-ARG MYSQL_PASSWORD="a3k5Kds0dskdsq0D23"
+
+ARG PHP_USER="php"
+ARG PHP_PASS="mFjY2VwdGFibGUgZ"
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 # DEPENDECIES
 RUN apt-get update && apt-get install -y apt-utils wget ssl-cert curl lsb-release gnupg unzip
@@ -34,7 +46,7 @@ RUN wget -qO /tmp/phpmyadmin.zip https://files.phpmyadmin.net/phpMyAdmin/${PHPMY
     && chmod -R 775 /usr/share/phpmyadmin \
     && ln -s /usr/share/phpmyadmin ${WEB_ROOT}
 
-# MYSQL INSTALL
+# MARIADB INSTALL
 RUN apt-get -y install mariadb-server mariadb-client
 
 # WORDPRESS INSTALL
@@ -44,6 +56,21 @@ RUN wget -qO /tmp/wordpress.tar.gz https://wordpress.org/latest.tar.gz \
     && mv wordpress/* ${WEB_ROOT} \
     && rm -rf wordpress
 
+# MYSQL CONFIG
+RUN /etc/init.d/mysql start \
+    && mysql -e "CREATE DATABASE phpmyadmin ; \
+                CREATE USER ${PHP_USER} IDENTIFIED BY '${PHP_PASS}' ; \
+                GRANT ALL PRIVILEGES ON phpmyadmin.* TO ${PHP_USER} IDENTIFIED BY '${PHP_PASS}'; \
+                CREATE DATABASE ${WP_DB} ; \
+                CREATE USER ${WP_USER} IDENTIFIED BY '${WP_PASS}' ; \
+                GRANT ALL PRIVILEGES ON ${WP_DB}.* TO ${WP_USER} IDENTIFIED BY '${WP_PASS}' ; \
+                " \
+    && /etc/init.d/mysql stop
+
+# WORDPRESS CONFIG
+RUN cd ${WEB_ROOT} \
+    && sed -e "s/database_name_here/${WP_DB}/" -e "s/username_here/${WP_USER}/" -e "s/password_here/${WP_PASS}/" wp-config-sample.php > wp-config.php
+
 # NGINX COPY CONFIG
 COPY srcs/nginx-default.conf /etc/nginx/sites-enabled/default
 
@@ -52,10 +79,9 @@ RUN sed -i "s/autoindex off/autoindex ${AUTO_INDEX}/" /etc/nginx/sites-enabled/d
 # Using '+' as delimiter in sed because strings contains '/'
     && sed -i "s+root /var/www/html+root ${WEB_ROOT}+" /etc/nginx/sites-enabled/default
 
-
 # EXPOSED PORTS
 EXPOSE 80 443
 
-
-CMD service php${PHP_VERSION}-fpm start \
+CMD /etc/init.d/mysql start \
+    && service php${PHP_VERSION}-fpm start \
     && nginx -g "daemon off;"
