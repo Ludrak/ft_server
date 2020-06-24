@@ -3,11 +3,10 @@ FROM debian:buster
 LABEL maintainer="Luca Robino <lrobino@student.42.fr>"
 
 
-ARG WEB_ROOT="/var/www/html"
-ARG AUTO_INDEX="on"
-
 # SERVER
 ARG NAME="ft_server"
+ARG WEB_ROOT="/var/www/html"
+ARG AUTO_INDEX="on"
 
 # WORDPRESS
 ARG WP_DB="wordpress"
