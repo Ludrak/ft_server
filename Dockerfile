@@ -2,42 +2,60 @@ FROM debian:buster
 
 LABEL maintainer="Luca Robino <lrobino@student.42.fr>"
 
+
 ARG WEB_ROOT="/var/www/html"
 ARG AUTO_INDEX="on"
 
-ARG MYSQL_USR="mysql"
-ARG MYSQL_BASEDIR="/opt/mysql/mysql"
-ARG MYSQL_DATADIR="/opt/mysql/mysql/data"
+# SERVER
+ARG NAME="ft_server"
 
+# WORDPRESS
 ARG WP_DB="wordpress"
-ARG WP_USER="wordpress"
+ARG WP_USER="wordpress-usr"
 ARG WP_PASS="23hjDF67dsSQ86e2"
 
-ARG PHP_VERSION="7.3"
-ENV PHP_VERSION=${PHP_VERSION}
-ARG PHPMYADMIN_VERSION="4.9.4"
-
-ARG PHP_USER="php"
+# PHP
+ENV PHP_VERSION="7.3"
+ARG PHP_USER="php-usr"
 ARG PHP_PASS="mFjY2VwdGFibGUgZ"
+
+# PHPMYADMIN
+ARG PHPMYADMIN_VERSION="5.0.2"
+ARG PHP_DB="phpmyadmin"
+ARG PHPMYADMIN_SECRET="Z2hmhgfmaGZzaGfds2ZzZgfdgmZHNnc2ZkZutrZGdN6erf2ZnaGZoc2ZoZnNoZm"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+
+
 # DEPENDECIES
-RUN apt-get update && apt-get install -y apt-utils wget ssl-cert curl lsb-release gnupg unzip
+RUN apt-get update && apt-get upgrade && apt-get install -y wget ssl-cert lsb-release gnupg unzip
 
 # WEB ROOT CONFIG
 RUN mkdir -p ${WEB_ROOT} && \
     chown -R www-data:www-data ${WEB_ROOT} && \
     chmod -R 775 ${WEB_ROOT}
 
+
+
+##              INSTALL
+##           -------------
+
 # NGINX & PHP INSTALL
-RUN apt-get install -y nginx
-RUN apt-get install -y php${PHP_VERSION} \
+RUN apt-get update && apt-get install -y nginx
+RUN apt-get update && apt-get install -y php${PHP_VERSION} \
                     php${PHP_VERSION}-fpm \
-                    php${PHP_VERSION}-common \
                     php${PHP_VERSION}-cli \
+                    php${PHP_VERSION}-common \
                     php${PHP_VERSION}-mbstring \
-                    php${PHP_VERSION}-mysql
+                    php${PHP_VERSION}-mysql \
+                    php${PHP_VERSION}-gd \
+                    php${PHP_VERSION}-curl \
+                    php${PHP_VERSION}-imagick \
+                    php${PHP_VERSION}-zip \
+                    php${PHP_VERSION}-dom
+
+# PHPMYADMIN INSTALL
 RUN wget -qO /tmp/phpmyadmin.zip https://files.phpmyadmin.net/phpMyAdmin/${PHPMYADMIN_VERSION}/phpMyAdmin-${PHPMYADMIN_VERSION}-all-languages.zip \
     && unzip /tmp/phpmyadmin.zip \
     && rm -rf /tmp/phpmyadmin.zip \
@@ -47,37 +65,56 @@ RUN wget -qO /tmp/phpmyadmin.zip https://files.phpmyadmin.net/phpMyAdmin/${PHPMY
     && ln -s /usr/share/phpmyadmin ${WEB_ROOT}
 
 # MARIADB INSTALL
-RUN apt-get -y install mariadb-server mariadb-client
+RUN apt-get update && apt-get -y install mariadb-server mariadb-client
 
 # WORDPRESS INSTALL
 RUN wget -qO /tmp/wordpress.tar.gz https://wordpress.org/latest.tar.gz \
     && tar -zxf /tmp/wordpress.tar.gz \
     && rm -rf /tmp/wordpress.tar.gz \
     && mv wordpress/* ${WEB_ROOT} \
+    && chown -R www-data:www-data ${WEB_ROOT} \
     && rm -rf wordpress
 
-# MYSQL CONFIG
-RUN /etc/init.d/mysql start \
-    && mysql -e "CREATE DATABASE phpmyadmin ; \
-                CREATE USER ${PHP_USER} IDENTIFIED BY '${PHP_PASS}' ; \
-                GRANT ALL PRIVILEGES ON phpmyadmin.* TO ${PHP_USER} IDENTIFIED BY '${PHP_PASS}'; \
-                CREATE DATABASE ${WP_DB} ; \
-                CREATE USER ${WP_USER} IDENTIFIED BY '${WP_PASS}' ; \
-                GRANT ALL PRIVILEGES ON ${WP_DB}.* TO ${WP_USER} IDENTIFIED BY '${WP_PASS}' ; \
-                " \
-    && /etc/init.d/mysql stop
+
+
+##              CONFIG
+##           ------------
+
+# PHP CONFIG
+RUN cd /usr/share/phpmyadmin \
+    && sed -e "s|cfg\['blowfish_secret'\] = ''|cfg['blowfish_secret'] = '${PHPMYADMIN_SECRET}'|" config.sample.inc.php > config.inc.php
 
 # WORDPRESS CONFIG
 RUN cd ${WEB_ROOT} \
-    && sed -e "s/database_name_here/${WP_DB}/" -e "s/username_here/${WP_USER}/" -e "s/password_here/${WP_PASS}/" wp-config-sample.php > wp-config.php
+    && sed -e "s/database_name_here/${WP_DB}/" \
+            -e "s/username_here/${WP_USER}/" \
+            -e "s/password_here/${WP_PASS}/" \
+            -e "s+\/\* That's all, stop editing! Happy publishing. \*\/+define\( \"FS_METHOD\", \"direct\" \);+" \
+        wp-config-sample.php > wp-config.php
+
+# MYSQL CONFIG
+RUN /etc/init.d/mysql start \
+    #phpmyadmin database w/ php user
+    && mysql -e "CREATE DATABASE ${PHP_DB} ; \
+                CREATE USER '${PHP_USER}' IDENTIFIED BY '${PHP_PASS}' ; \
+                GRANT ALL PRIVILEGES ON ${PHP_DB}.* TO '${PHP_USER}' ; \
+    #wp database w/ wp user
+                CREATE DATABASE ${WP_DB} ; \
+                CREATE USER '${WP_USER}' IDENTIFIED BY '${WP_PASS}' ; \
+                GRANT ALL PRIVILEGES ON ${WP_DB}.* TO '${WP_USER}' ; \
+                " \
+    && /etc/init.d/mysql stop
 
 # NGINX COPY CONFIG
 COPY srcs/nginx-default.conf /etc/nginx/sites-enabled/default
 
 # NGINX CONFIG
 RUN sed -i "s/autoindex off/autoindex ${AUTO_INDEX}/" /etc/nginx/sites-enabled/default \
-# Using '+' as delimiter in sed because strings contains '/'
-    && sed -i "s+root /var/www/html+root ${WEB_ROOT}+" /etc/nginx/sites-enabled/default
+    && sed -i "s+root /var/www/html+root ${WEB_ROOT}+" /etc/nginx/sites-enabled/default \
+    && sed -i "s/php7.3-fpm/php${PHP_VERSION}-fpm/" /etc/nginx/sites-enabled/default \
+    && sed -i "s/server_name_here/${NAME}/" /etc/nginx/sites-enabled/default
+
+
 
 # EXPOSED PORTS
 EXPOSE 80 443
