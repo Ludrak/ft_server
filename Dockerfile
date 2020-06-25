@@ -1,12 +1,11 @@
 FROM debian:buster
 
-LABEL maintainer="Luca Robino <lrobino@student.42.fr>"
-
+LABEL maintainer="Luca Robino <lrobino@student.42Lyon.fr>"
 
 # SERVER
-ARG NAME="ft_server"
+ARG NAME="127.0.0.1"
 ARG WEB_ROOT="/var/www/html"
-ARG AUTO_INDEX="on"
+ARG AUTO_INDEX="off"
 
 # WORDPRESS
 ARG WP_DB="wordpress"
@@ -20,7 +19,7 @@ ARG PHP_PASS="mFjY2VwdGFibGUgZ"
 
 # PHPMYADMIN
 ARG PHPMYADMIN_VERSION="5.0.2"
-ARG PHP_DB="phpmyadmin"
+ARG PMA_DB="phpmyadmin"
 ARG PHPMYADMIN_SECRET="Z2hmhgfmaGZzaGfds2ZzZgfdgmZHNnc2ZkZutrZGdN6erf2ZnaGZoc2ZoZnNoZm"
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -64,14 +63,14 @@ RUN wget -qO /tmp/phpmyadmin.zip https://files.phpmyadmin.net/phpMyAdmin/${PHPMY
     && ln -s /usr/share/phpmyadmin ${WEB_ROOT}
 
 # MARIADB INSTALL
-RUN apt-get update && apt-get -y install mariadb-server mariadb-client
+RUN apt-get update && apt-get -y install mariadb-server
 
 # WORDPRESS INSTALL
 RUN wget -qO /tmp/wordpress.tar.gz https://wordpress.org/latest.tar.gz \
     && tar -zxf /tmp/wordpress.tar.gz \
     && rm -rf /tmp/wordpress.tar.gz \
-    && mv wordpress/* ${WEB_ROOT} \
-    && chown -R www-data:www-data ${WEB_ROOT} \
+    && mv wordpress/ ${WEB_ROOT}/wordpress \
+    && chown -R www-data:www-data ${WEB_ROOT}/wordpress \
     && rm -rf wordpress
 
 
@@ -84,7 +83,7 @@ RUN cd /usr/share/phpmyadmin \
     && sed -e "s|cfg\['blowfish_secret'\] = ''|cfg['blowfish_secret'] = '${PHPMYADMIN_SECRET}'|" config.sample.inc.php > config.inc.php
 
 # WORDPRESS CONFIG
-RUN cd ${WEB_ROOT} \
+RUN cd ${WEB_ROOT}/wordpress \
     && sed -e "s/database_name_here/${WP_DB}/" \
             -e "s/username_here/${WP_USER}/" \
             -e "s/password_here/${WP_PASS}/" \
@@ -94,24 +93,30 @@ RUN cd ${WEB_ROOT} \
 # MYSQL CONFIG
 RUN /etc/init.d/mysql start \
     #phpmyadmin database w/ php user
-    && mysql -e "CREATE DATABASE ${PHP_DB} ; \
+    && mysql -e "CREATE DATABASE ${PMA_DB} ; \
                 CREATE USER '${PHP_USER}' IDENTIFIED BY '${PHP_PASS}' ; \
-                GRANT ALL PRIVILEGES ON ${PHP_DB}.* TO '${PHP_USER}' ; \
+                GRANT ALL PRIVILEGES ON ${PMA_DB}.* TO '${PHP_USER}' ; \
+                FLUSH PRIVILEGES ; \
     #wp database w/ wp user
                 CREATE DATABASE ${WP_DB} ; \
                 CREATE USER '${WP_USER}' IDENTIFIED BY '${WP_PASS}' ; \
                 GRANT ALL PRIVILEGES ON ${WP_DB}.* TO '${WP_USER}' ; \
-                " \
-    && /etc/init.d/mysql stop
+                FLUSH PRIVILEGES ; \
+                "
 
 # NGINX COPY CONFIG
 COPY srcs/nginx-default.conf /etc/nginx/sites-enabled/default
 
 # NGINX CONFIG
-RUN sed -i "s/autoindex off/autoindex ${AUTO_INDEX}/" /etc/nginx/sites-enabled/default \
-    && sed -i "s+root /var/www/html+root ${WEB_ROOT}+" /etc/nginx/sites-enabled/default \
-    && sed -i "s/php7.3-fpm/php${PHP_VERSION}-fpm/" /etc/nginx/sites-enabled/default \
-    && sed -i "s/server_name_here/${NAME}/" /etc/nginx/sites-enabled/default
+RUN cd /etc/nginx/sites-enabled/ \
+    && sed -i "s/autoindex off/autoindex ${AUTO_INDEX}/" default \
+    && sed -i "s+root /var/www/html+root ${WEB_ROOT}+" default \
+    && sed -i "s/php7.3-fpm/php${PHP_VERSION}-fpm/" default \
+    && sed -i "s/server_name_here/${NAME}/" default \
+    && if [ "${AUTO_INDEX}" = "on" ] ; then \
+            sed -i "s/index index.php;/#/" default ; \
+            sed -i "s+location = / { return 301 /wordpress; }+#+" default ; \
+        fi
 
 
 
